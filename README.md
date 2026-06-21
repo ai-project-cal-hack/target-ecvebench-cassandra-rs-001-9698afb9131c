@@ -1,6 +1,6 @@
-[![Build Status](https://github.com/Metaswitch/cassandra-rs/actions/workflows/build.yml/badge.svg)](https://github.com/Metaswitch/cassandra-rs/actions)
+[![Build Status](https://github.com/cassandra-rs/cassandra-rs/actions/workflows/build.yml/badge.svg)](https://github.com/cassandra-rs/cassandra-rs/actions)
 [![Current Version](https://img.shields.io/crates/v/cassandra-cpp.svg)](https://crates.io/crates/cassandra-cpp)
-[![License](https://img.shields.io/github/license/Metaswitch/cassandra-rs.svg)](#License)
+[![License](https://img.shields.io/github/license/cassandra-rs/cassandra-rs.svg)](#License)
 
 # cassandra-cpp
 
@@ -9,7 +9,7 @@ exposes the DataStax cpp driver at https://github.com/datastax/cpp-driver/
 in a somewhat-sane crate.
 It was originally a fork of https://github.com/tupshin/cassandra-rs but that is no longer maintained.
 
-It is a wrapper around the raw driver binding crate [cassandra-cpp-sys](https://github.com/Metaswitch/cassandra-sys-rs).
+It is a wrapper around the raw driver binding crate [cassandra-cpp-sys](https://github.com/cassandra-rs/cassandra-sys-rs).
 
 [Documentation (crates.io)](https://docs.rs/cassandra-cpp).
 
@@ -51,9 +51,59 @@ thin wrapper around the DataStax driver, you may also find the DataStax
 ## Example
 
 For a straightforward example see [`simple.rs`](examples/simple.rs).
-    
+
 There are additional examples included with the project in [`tests`](tests/) and
 [`examples`](examples/).
+
+## Lending iterator API (version 3.0)
+
+Version 3.0 fixes a soundness issue with the previous API. The iterators in the
+underlying Cassandra driver invalidate the current item when `next()` is called,
+and this was not reflected in the Rust binding prior to version 3.
+
+To deal with this, the various iterators (`ResultIterator`, `RowIterator`,
+`MapIterator`, `SetIterator`, `FieldIterator`, `UserTypeIterator`,
+`KeyspaceIterator`, `FunctionIterator`, `AggregateIterator`, `TableIterator`,
+`ColumnIterator`) no longer implement `std::iter::Iterator`. Instead, since this
+is a [lending
+iterator,](https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html#generic-associated-types-gats)
+these types all implement a new `LendingIterator` trait. We define this
+ourselves because there is currently no widely-used crate that implements it.
+
+To upgrade, change
+
+```rust
+for row in result {
+  // ... do something with row ...
+}
+```
+
+to
+
+```rust
+let mut iter = result.iter();
+while let Some(row) = iter.next() {
+  // ... do something with row ...
+}
+```
+
+The intermediate variable `iter` is necessary, otherwise you will infinitely
+visit the first row of the result!
+
+Other changes:
+
+* Many types now take a lifetime argument, e.g., `Value` is now `Value<'a>`,
+  `ResultIterator` is now `ResultIterator<'a>`. In almost all cases you can omit
+  this and it will be inferred for you. If not, you can usually write
+  `Value<'_>` to let Rust worry about it for you.
+* `RowIterator` no longer implements `Display` (since it would consume the
+  iterator); however `Row` does.
+* `TupleIterator` is removed - it was never used, since you use the set iterator
+  (Value::get_set()) for lists, sets, and tuples.
+* `ConstDataType::sub_data_by_name` and `ConstDataType::sub_type_name` now take
+  `&self` rather than an explicit argument.
+* `FunctionMeta::argument` now returns the name and type, rather than just `()`.
+
 
 ## New session API (version 2.0)
 
@@ -79,7 +129,7 @@ In addition, the legacy `.wait()` API is removed in favour of the now-ubiquitous
   recreate the statement.
 
 * `Batch::new` is removed in favour of `Session::batch`.
-  
+
 * There is a new error, `BatchSessionMismatch`, which occurs if you try to add
   statements from different `Session`s into the same `Batch`.
 
@@ -131,7 +181,7 @@ to this project.
 
 ## Development
 
-This crate is regularly built by Travis; to see details of the most recent builds
+This crate is regularly built by GitHub Actions; to see details of the most recent builds
 click on the "build" badge at the top of this page.
 
 You must have the DataStax driver installed on your system in order to build
