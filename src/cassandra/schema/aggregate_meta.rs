@@ -18,37 +18,31 @@ use crate::cassandra_sys::cass_aggregate_meta_state_type;
 use crate::cassandra_sys::cass_iterator_fields_from_aggregate_meta;
 use crate::cassandra_sys::raw2utf8;
 use crate::cassandra_sys::CassAggregateMeta as _CassAggregateMeta;
-use std::marker::PhantomData;
-
+use std::mem;
 use std::os::raw::c_char;
 
-/// Metadata about a Cassandra aggregate
-//
-// Borrowed immutably.
+/// Metadata about a cassandra aggregate
 #[derive(Debug)]
-pub struct AggregateMeta<'a>(
-    *const _CassAggregateMeta,
-    PhantomData<&'a _CassAggregateMeta>,
-);
+pub struct AggregateMeta(*const _CassAggregateMeta);
 
-impl ProtectedInner<*const _CassAggregateMeta> for AggregateMeta<'_> {
+impl ProtectedInner<*const _CassAggregateMeta> for AggregateMeta {
     fn inner(&self) -> *const _CassAggregateMeta {
         self.0
     }
 }
 
-impl Protected<*const _CassAggregateMeta> for AggregateMeta<'_> {
+impl Protected<*const _CassAggregateMeta> for AggregateMeta {
     fn build(inner: *const _CassAggregateMeta) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        AggregateMeta(inner, PhantomData)
+        AggregateMeta(inner)
     }
 }
 
-impl<'a> AggregateMeta<'a> {
+impl AggregateMeta {
     /// An iterator over the fields of an aggregate
-    pub fn fields_iter(&self) -> FieldIterator<'a> {
+    pub fn fields_iter(&self) -> FieldIterator {
         unsafe { FieldIterator::build(cass_iterator_fields_from_aggregate_meta(self.0)) }
     }
 
@@ -78,39 +72,39 @@ impl<'a> AggregateMeta<'a> {
     }
 
     /// Gets the aggregate's argument type for the provided index.
-    pub fn argument_type(&self, index: usize) -> ConstDataType<'a> {
+    pub fn argument_type(&self, index: usize) -> ConstDataType {
         // TODO: can return NULL
         unsafe { ConstDataType::build(cass_aggregate_meta_argument_type(self.0, index)) }
     }
 
     /// Gets the aggregate's argument return type.
-    pub fn return_type(&self) -> ConstDataType<'a> {
+    pub fn return_type(&self) -> ConstDataType {
         unsafe { ConstDataType::build(cass_aggregate_meta_return_type(self.0)) }
     }
 
     /// Gets the aggregate's argument state type.
-    pub fn state_type(&self) -> ConstDataType<'a> {
+    pub fn state_type(&self) -> ConstDataType {
         unsafe { ConstDataType::build(cass_aggregate_meta_state_type(self.0)) }
     }
 
     /// Gets the function metadata for the aggregate's state function.
-    pub fn state_func(&self) -> FunctionMeta<'a> {
+    pub fn state_func(&self) -> FunctionMeta {
         unsafe { FunctionMeta::build(cass_aggregate_meta_state_func(self.0)) }
     }
 
     /// Gets the function metadata for the aggregates's final function.
-    pub fn final_func(&self) -> FunctionMeta<'a> {
+    pub fn final_func(&self) -> FunctionMeta {
         unsafe { FunctionMeta::build(cass_aggregate_meta_final_func(self.0)) }
     }
 
     ///  Gets the initial condition value for the aggregate.
-    pub fn init_cond(&self) -> Value<'a> {
+    pub fn init_cond(&self) -> Value {
         unsafe { Value::build(cass_aggregate_meta_init_cond(self.0)) }
     }
 
     ///  Gets a metadata field for the provided name. Metadata fields allow direct
     /// access to the column data found in the underlying "aggregates" metadata table.
-    pub fn field_by_name(&self, name: &str) -> Option<Value<'a>> {
+    pub fn field_by_name(&self, name: &str) -> Option<Value> {
         unsafe {
             let name_ptr = name.as_ptr() as *const c_char;
             let agg = cass_aggregate_meta_field_by_name_n(self.0, name_ptr, name.len());

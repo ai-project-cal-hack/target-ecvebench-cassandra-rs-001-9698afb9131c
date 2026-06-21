@@ -12,8 +12,7 @@ async fn main() -> Result<()> {
         .await?;
     println!("{}", result);
 
-    let mut iter = result.iter();
-    while let Some(row) = iter.next() {
+    for row in result.iter() {
         let col: String = row.get_by_name("keyspace_name")?;
         println!("ks name = {}", col);
     }

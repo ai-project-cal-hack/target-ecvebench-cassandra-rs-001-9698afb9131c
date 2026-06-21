@@ -11,35 +11,33 @@ use crate::cassandra_sys::cass_iterator_fields_from_column_meta;
 use crate::cassandra_sys::CassColumnMeta as _CassColumnMeta;
 use crate::cassandra_sys::CassColumnType as _CassColumnType;
 
-use std::marker::PhantomData;
+/// Column metadata
+#[derive(Debug)]
+pub struct ColumnMeta(*const _CassColumnMeta);
+
+use std::mem;
 use std::os::raw::c_char;
 use std::slice;
 use std::str;
 
-/// Column metadata
-//
-// Borrowed immutably.
-#[derive(Debug)]
-pub struct ColumnMeta<'a>(*const _CassColumnMeta, PhantomData<&'a _CassColumnMeta>);
-
-impl ProtectedInner<*const _CassColumnMeta> for ColumnMeta<'_> {
+impl ProtectedInner<*const _CassColumnMeta> for ColumnMeta {
     fn inner(&self) -> *const _CassColumnMeta {
         self.0
     }
 }
 
-impl Protected<*const _CassColumnMeta> for ColumnMeta<'_> {
+impl Protected<*const _CassColumnMeta> for ColumnMeta {
     fn build(inner: *const _CassColumnMeta) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        ColumnMeta(inner, PhantomData)
+        ColumnMeta(inner)
     }
 }
 
-impl<'a> ColumnMeta<'a> {
+impl ColumnMeta {
     /// returns an iterator over the fields of this column
-    pub fn field_iter(&self) -> FieldIterator<'a> {
+    pub fn field_iter(&mut self) -> FieldIterator {
         unsafe { FieldIterator::build(cass_iterator_fields_from_column_meta(self.0)) }
     }
 
@@ -60,13 +58,13 @@ impl<'a> ColumnMeta<'a> {
     }
 
     /// Gets the data type of the column.
-    pub fn data_type(&self) -> ConstDataType<'a> {
+    pub fn data_type(&self) -> ConstDataType {
         unsafe { ConstDataType::build(cass_column_meta_data_type(self.0)) }
     }
 
     /// Gets a metadata field for the provided name. Metadata fields allow direct
     /// access to the column data found in the underlying "columns" metadata table.
-    pub fn field_by_name(&self, name: &str) -> Option<Value<'a>> {
+    pub fn field_by_name(&self, name: &str) -> Option<Value> {
         unsafe {
             let name_ptr = name.as_ptr() as *const c_char;
             let field = cass_column_meta_field_by_name_n(self.0, name_ptr, name.len());

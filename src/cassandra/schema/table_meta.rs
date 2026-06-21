@@ -16,48 +16,44 @@ use crate::cassandra_sys::cass_table_meta_name;
 use crate::cassandra_sys::cass_table_meta_partition_key;
 use crate::cassandra_sys::cass_table_meta_partition_key_count;
 use crate::cassandra_sys::CassTableMeta as _CassTableMeta;
-
-use std::marker::PhantomData;
-
+use std::mem;
 use std::os::raw::c_char;
 use std::slice;
 
 use std::str;
 
 /// Table metadata
-//
-// Borrowed from wherever the value is borrowed from.
 #[derive(Debug)]
-pub struct TableMeta<'a>(*const _CassTableMeta, PhantomData<&'a _CassTableMeta>);
+pub struct TableMeta(*const _CassTableMeta);
 
-impl ProtectedInner<*const _CassTableMeta> for TableMeta<'_> {
+impl ProtectedInner<*const _CassTableMeta> for TableMeta {
     fn inner(&self) -> *const _CassTableMeta {
         self.0
     }
 }
 
-impl Protected<*const _CassTableMeta> for TableMeta<'_> {
+impl Protected<*const _CassTableMeta> for TableMeta {
     fn build(inner: *const _CassTableMeta) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        TableMeta(inner, PhantomData)
+        TableMeta(inner)
     }
 }
 
-impl<'a> TableMeta<'a> {
+impl TableMeta {
     /// returns an iterator over the fields of this table
-    pub fn field_iter(&self) -> FieldIterator<'a> {
+    pub fn field_iter(&mut self) -> FieldIterator {
         unsafe { FieldIterator::build(cass_iterator_fields_from_table_meta(self.0)) }
     }
 
     /// An iterator over the columns in this table
-    pub fn columns_iter(&self) -> ColumnIterator<'a> {
+    pub fn columns_iter(&self) -> ColumnIterator {
         unsafe { ColumnIterator::build(cass_iterator_columns_from_table_meta(self.0)) }
     }
 
     /// Gets the column metadata for the provided column name.
-    pub fn column_by_name(&self, name: &str) -> ColumnMeta<'a> {
+    pub fn column_by_name(&self, name: &str) -> ColumnMeta {
         // TODO: can return NULL
         unsafe {
             ColumnMeta::build(cass_table_meta_column_by_name(
@@ -85,7 +81,7 @@ impl<'a> TableMeta<'a> {
     }
 
     /// Gets the column metadata for the provided index.
-    pub fn column(&self, index: usize) -> ColumnMeta<'a> {
+    pub fn column(&self, index: usize) -> ColumnMeta {
         // TODO: can return NULL
         unsafe { ColumnMeta::build(cass_table_meta_column(self.0, index)) }
     }
@@ -96,7 +92,7 @@ impl<'a> TableMeta<'a> {
     }
 
     /// Gets the partition key column metadata for the provided index.
-    pub fn partition_key(&self, index: usize) -> Option<ColumnMeta<'a>> {
+    pub fn partition_key(&self, index: usize) -> Option<ColumnMeta> {
         unsafe {
             let key = cass_table_meta_partition_key(self.0, index);
             if key.is_null() {
@@ -113,7 +109,7 @@ impl<'a> TableMeta<'a> {
     }
 
     /// Gets the clustering key column metadata for the provided index.
-    pub fn cluster_key(&self, index: usize) -> Option<ColumnMeta<'a>> {
+    pub fn cluster_key(&self, index: usize) -> Option<ColumnMeta> {
         unsafe {
             let key = cass_table_meta_clustering_key(self.0, index);
             if key.is_null() {
@@ -126,7 +122,7 @@ impl<'a> TableMeta<'a> {
 
     /// Gets a metadata field for the provided name. Metadata fields allow direct
     /// access to the column data found in the underlying "tables" metadata table.
-    pub fn field_by_name(&self, name: &str) -> Option<Value<'a>> {
+    pub fn field_by_name(&self, name: &str) -> Option<Value> {
         // fixme replace CassValule with a custom type
         unsafe {
             let value = cass_table_meta_field_by_name(self.0, name.as_ptr() as *const c_char);

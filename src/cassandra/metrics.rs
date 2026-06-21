@@ -1,3 +1,4 @@
+use crate::cassandra::util::Protected;
 use crate::cassandra_sys::CassMetrics as _CassMetrics;
 
 /// Metrics about the current session.

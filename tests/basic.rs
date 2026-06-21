@@ -121,10 +121,10 @@ fn basic_from_result(result: CassResult) -> Result<Option<Basic>> {
         None => Ok(None),
         Some(row) => {
             // todo: refactor?
-            let mut fields_iter: UserTypeIterator = row.get(12)?;
+            let fields_iter: UserTypeIterator = row.get(12)?;
             let mut dt: u32 = 0;
             let mut tm: i64 = 0;
-            while let Some(field) = fields_iter.next() {
+            for field in fields_iter {
                 match field.0.as_ref() {
                     "dt" => dt = field.1.get_u32()?,
                     "tm" => tm = field.1.get_i64()?,
@@ -183,8 +183,7 @@ async fn test_simple() -> Result<()> {
 
     println!("{}", result);
     let mut names = vec![];
-    let mut iter = result.iter();
-    while let Some(row) = iter.next() {
+    for row in result.iter() {
         let col: String = row.get_by_name("keyspace_name").unwrap();
         println!("ks name = {}", col);
         names.push(col);
@@ -320,7 +319,7 @@ async fn test_decimal_round_trip() -> Result<()> {
     let decimal_values = vec![
         ("big positive number", "1234567890123456789012345678901234567890123456789012345678901234567890.123456789012345678901234567890123456789012345678901234567890"),
         ("big negative number", "-1234567890123456789012345678901234567890123456789012345678901234567890.123456789012345678901234567890123456789012345678901234567890"),
-        ("zero with 4 trailing zero", "0.0000"),
+        ("zero with 16 trailing zero", "0.0000000000000000"),
     ];
 
     // compare "literal CQL statement" to "driver value"
@@ -339,8 +338,7 @@ async fn test_decimal_round_trip() -> Result<()> {
             ))
             .await?;
 
-        let mut iter = result.iter();
-        while let Some(row) = iter.next() {
+        for row in result.into_iter() {
             let txt: String = row.get_by_name("txt").unwrap();
             let dec: BigDecimal = row.get_by_name("dec").unwrap();
 
@@ -370,8 +368,7 @@ async fn test_decimal_round_trip() -> Result<()> {
             ))
             .await?;
 
-        let mut iter = result.iter();
-        while let Some(row) = iter.next() {
+        for row in result.into_iter() {
             let txt: String = row.get_by_name("txt").unwrap();
             let dec: BigDecimal = row.get_by_name("dec").unwrap();
 
@@ -634,8 +631,7 @@ async fn test_error_reporting() -> Result<()> {
     let result = session
         .execute("SELECT i32 FROM examples.basic WHERE key = 'utf8';")
         .await?;
-    let mut iter = result.iter();
-    let row = iter.next().unwrap();
+    let row = result.iter().next().unwrap();
     let err = row
         .get_column(0)?
         .get_string()

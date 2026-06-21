@@ -1,3 +1,4 @@
+use crate::cassandra::data_type::DataType;
 use crate::cassandra::error::*;
 use crate::cassandra::field::Field;
 use crate::cassandra::schema::aggregate_meta::AggregateMeta;
@@ -27,78 +28,25 @@ use crate::cassandra_sys::cass_iterator_get_user_type_field_value;
 use crate::cassandra_sys::cass_iterator_get_value;
 use crate::cassandra_sys::cass_iterator_next;
 use crate::cassandra_sys::cass_true;
-use crate::cassandra_sys::CassKeyspaceMeta;
-use crate::cassandra_sys::CassSchemaMeta;
-use crate::cassandra_sys::CassTableMeta;
-use crate::cassandra_sys::CassValue as _CassValue;
+use std::{mem, slice, str};
 
-use std::marker::PhantomData;
-use std::{slice, str};
-
-/// Iterator that only allows access to a single item at a time. You must stop
-/// using the returned item before getting the next.
-///
-/// Ultimately we will move to use a common crate for this, but to date
-/// there is no good crate to follow.
-/// https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html#generic-associated-types-gats
-/// and https://github.com/Crazytieguy/gat-lending-iterator were references
-/// for this code.
-///
-/// The idiomatic way to work with this trait is as follows:
-///
-/// ```
-/// # use cassandra_cpp::*;
-/// # struct MyLI;
-/// # impl LendingIterator for MyLI {
-/// #   type Item<'a> = ();
-/// #   fn next<'a>(&'a mut self) -> Option<Self::Item<'a>> { None }
-/// #   fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(0)) }
-/// # }
-/// # let mut lending_iterator = MyLI;
-/// while let Some(row) = lending_iterator.next() {
-///   // ... do something with `row` ...
-/// }
-/// ```
-pub trait LendingIterator {
-    /// The type of each item.
-    type Item<'a>
-    where
-        Self: 'a;
-
-    /// Retrieve the next item from the iterator; it lives only as long as the
-    /// mutable reference to the iterator.
-    fn next(&mut self) -> Option<Self::Item<'_>>;
-
-    /// Minimum and optional maximum expected length of the iterator.
-    /// Default implementation returns `(0, None)`.
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-}
-
-/// Iterator over the aggregates in the keyspace.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterates over the  aggregate metadata entries(??)
 #[derive(Debug)]
-pub struct AggregateIterator<'a>(*mut _CassIterator, PhantomData<&'a CassKeyspaceMeta>);
+pub struct AggregateIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for AggregateIterator<'_> {}
-unsafe impl Sync for AggregateIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for AggregateIterator {}
 
-impl Drop for AggregateIterator<'_> {
+impl Drop for AggregateIterator {
     fn drop(&mut self) {
         unsafe { cass_iterator_free(self.0) }
     }
 }
 
-impl LendingIterator for AggregateIterator<'_> {
-    type Item<'a> = AggregateMeta<'a> where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for AggregateIterator {
+    type Item = AggregateMeta;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -111,29 +59,23 @@ impl LendingIterator for AggregateIterator<'_> {
     }
 }
 
-/// Iterator over the fields of a UDT
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterater over the fields of a UDT
 #[derive(Debug)]
-pub struct UserTypeIterator<'a>(*mut _CassIterator, PhantomData<&'a _CassValue>);
+pub struct UserTypeIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for UserTypeIterator<'_> {}
-unsafe impl Sync for UserTypeIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for UserTypeIterator {}
 
-impl Drop for UserTypeIterator<'_> {
+impl Drop for UserTypeIterator {
     fn drop(&mut self) {
         unsafe { cass_iterator_free(self.0) }
     }
 }
 
-impl LendingIterator for UserTypeIterator<'_> {
-    type Item<'a> = (String, Value<'a>) where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for UserTypeIterator {
+    type Item = (String, Value);
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -143,8 +85,8 @@ impl LendingIterator for UserTypeIterator<'_> {
     }
 }
 
-impl UserTypeIterator<'_> {
-    fn get_field_name(&self) -> String {
+impl UserTypeIterator {
+    fn get_field_name(&mut self) -> String {
         unsafe {
             let mut name = std::ptr::null();
             let mut name_length = 0;
@@ -158,29 +100,22 @@ impl UserTypeIterator<'_> {
                 .expect("Cassandra error during iteration")
         }
     }
-
-    fn get_field_value(&self) -> Value {
+    fn get_field_value(&mut self) -> Value {
         unsafe { Value::build(cass_iterator_get_user_type_field_value(self.0)) }
     }
 }
 
-/// Iterator over the functions in a keyspace.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterater over the  function metadata entries(??)
 #[derive(Debug)]
-pub struct FunctionIterator<'a>(*mut _CassIterator, PhantomData<&'a CassKeyspaceMeta>);
+pub struct FunctionIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for FunctionIterator<'_> {}
-unsafe impl Sync for FunctionIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for FunctionIterator {}
 
-impl LendingIterator for FunctionIterator<'_> {
-    type Item<'a> = FunctionMeta<'a> where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for FunctionIterator {
+    type Item = FunctionMeta;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -190,23 +125,17 @@ impl LendingIterator for FunctionIterator<'_> {
     }
 }
 
-/// Iterator over the tables in a keyspace.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterater over the table's metadata entries(??)
 #[derive(Debug)]
-pub struct TableIterator<'a>(*mut _CassIterator, PhantomData<&'a CassKeyspaceMeta>);
+pub struct TableIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for TableIterator<'_> {}
-unsafe impl Sync for TableIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for TableIterator {}
 
-impl LendingIterator for TableIterator<'_> {
-    type Item<'a> = TableMeta<'a> where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for TableIterator {
+    type Item = TableMeta;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -216,23 +145,17 @@ impl LendingIterator for TableIterator<'_> {
     }
 }
 
-/// Iterator over the keyspaces in the schema.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterater over the keyspace's metadata entries(??)
 #[derive(Debug)]
-pub struct KeyspaceIterator<'a>(*mut _CassIterator, PhantomData<&'a CassSchemaMeta>);
+pub struct KeyspaceIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for KeyspaceIterator<'_> {}
-unsafe impl Sync for KeyspaceIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for KeyspaceIterator {}
 
-impl LendingIterator for KeyspaceIterator<'_> {
-    type Item<'a> = KeyspaceMeta<'a> where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for KeyspaceIterator {
+    type Item = KeyspaceMeta;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -242,23 +165,17 @@ impl LendingIterator for KeyspaceIterator<'_> {
     }
 }
 
-/// Iterator over the columns in a table.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+/// Iterater over the columns's metadata entries(??)
 #[derive(Debug)]
-pub struct ColumnIterator<'a>(*mut _CassIterator, PhantomData<&'a CassTableMeta>);
+pub struct ColumnIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for ColumnIterator<'_> {}
-unsafe impl Sync for ColumnIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for ColumnIterator {}
 
-impl LendingIterator for ColumnIterator<'_> {
-    type Item<'a> = ColumnMeta<'a> where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for ColumnIterator {
+    type Item = ColumnMeta;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -268,27 +185,17 @@ impl LendingIterator for ColumnIterator<'_> {
     }
 }
 
-/// Iterator over the fields in a metadata object.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
-//
-// Could be one of several underlying types; CassTableMeta is just a
-// representative. Since it's a phantom, it doesn't matter which type we name.
+/// Iterater over the field's metadata entries(??)
 #[derive(Debug)]
-pub struct FieldIterator<'a>(*mut _CassIterator, PhantomData<&'a CassTableMeta>);
+pub struct FieldIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for FieldIterator<'_> {}
-unsafe impl Sync for FieldIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for FieldIterator {}
 
-impl LendingIterator for FieldIterator<'_> {
-    type Item<'a> = Field<'a> where Self: 'a;
-
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for FieldIterator {
+    type Item = Field;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -310,164 +217,182 @@ impl LendingIterator for FieldIterator<'_> {
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for UserTypeIterator<'_> {
+// pub struct CassIteratorType(_CassIteratorType);
+
+// impl CassIteratorType {
+//    pub fn new(_type: _CassIteratorType) -> Self { CassIteratorType(_type) }
+// }
+
+// impl Protected<*mut _Batch> for CassIterator {
+//    fn inner(&self) -> *mut _CassIterator {
+//        self.0
+//    }
+//    fn build(inner: *mut _CassIterator) -> Self {
+//        CassIterator(inner)
+//    }
+// }
+
+impl ProtectedInner<*mut _CassIterator> for UserTypeIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for UserTypeIterator<'_> {
+impl Protected<*mut _CassIterator> for UserTypeIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        UserTypeIterator(inner, PhantomData)
+        UserTypeIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for AggregateIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for AggregateIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for AggregateIterator<'_> {
+impl Protected<*mut _CassIterator> for AggregateIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        AggregateIterator(inner, PhantomData)
+        AggregateIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for FunctionIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for FunctionIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for FunctionIterator<'_> {
+impl Protected<*mut _CassIterator> for FunctionIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        FunctionIterator(inner, PhantomData)
+        FunctionIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for KeyspaceIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for KeyspaceIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for KeyspaceIterator<'_> {
+impl Protected<*mut _CassIterator> for KeyspaceIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        KeyspaceIterator(inner, PhantomData)
+        KeyspaceIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for FieldIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for FieldIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
-impl Protected<*mut _CassIterator> for FieldIterator<'_> {
+impl Protected<*mut _CassIterator> for FieldIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        FieldIterator(inner, PhantomData)
+        FieldIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for ColumnIterator<'_> {
-    fn inner(&self) -> *mut _CassIterator {
-        self.0
-    }
-}
-
-impl Protected<*mut _CassIterator> for ColumnIterator<'_> {
-    fn build(inner: *mut _CassIterator) -> Self {
-        if inner.is_null() {
-            panic!("Unexpected null pointer")
-        };
-        ColumnIterator(inner, PhantomData)
-    }
-}
-
-impl ProtectedInner<*mut _CassIterator> for TableIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for ColumnIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for TableIterator<'_> {
+impl Protected<*mut _CassIterator> for ColumnIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        TableIterator(inner, PhantomData)
+        ColumnIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for MapIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for TableIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for MapIterator<'_> {
+impl Protected<*mut _CassIterator> for TableIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        MapIterator(inner, PhantomData)
+        TableIterator(inner)
     }
 }
 
-impl ProtectedInner<*mut _CassIterator> for SetIterator<'_> {
+impl ProtectedInner<*mut _CassIterator> for MapIterator {
     fn inner(&self) -> *mut _CassIterator {
         self.0
     }
 }
 
-impl Protected<*mut _CassIterator> for SetIterator<'_> {
+impl Protected<*mut _CassIterator> for MapIterator {
     fn build(inner: *mut _CassIterator) -> Self {
         if inner.is_null() {
             panic!("Unexpected null pointer")
         };
-        SetIterator(inner, PhantomData)
+        MapIterator(inner)
     }
 }
 
-/// Iterator over the values in a set.
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
+impl ProtectedInner<*mut _CassIterator> for SetIterator {
+    fn inner(&self) -> *mut _CassIterator {
+        self.0
+    }
+}
+
+impl Protected<*mut _CassIterator> for SetIterator {
+    fn build(inner: *mut _CassIterator) -> Self {
+        if inner.is_null() {
+            panic!("Unexpected null pointer")
+        };
+        SetIterator(inner)
+    }
+}
+
+/// Iterater over the set's metadata entries(??)
 #[derive(Debug)]
-pub struct SetIterator<'a>(*mut _CassIterator, PhantomData<&'a _CassValue>);
+pub struct SetIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for SetIterator<'_> {}
-unsafe impl Sync for SetIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for SetIterator {}
 
-impl Drop for SetIterator<'_> {
+// impl<'a> Display for &'a SetIterator {
+//    fn fmt(&self, f:&mut Formatter) -> fmt::Result {
+//        for item in self {
+//            try!(write!(f, "{}\t", item));
+//        }
+//        Ok(())
+//    }
+// }
+
+impl Drop for SetIterator {
     fn drop(&mut self) {
         unsafe { cass_iterator_free(self.0) }
     }
 }
 
-impl LendingIterator for SetIterator<'_> {
-    type Item<'a> = Value<'a> where Self: 'a;
+impl Iterator for SetIterator {
+    type Item = Value;
 
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
@@ -477,49 +402,75 @@ impl LendingIterator for SetIterator<'_> {
     }
 }
 
-impl SetIterator<'_> {
-    fn get_value(&self) -> Value {
+impl SetIterator {
+    fn get_value(&mut self) -> Value {
         unsafe { Value::build(cass_iterator_get_value(self.0)) }
     }
 }
 
-/// An iterator over the k/v pairs in a map.
+/// An iterator over the k/v pair in the map
 #[derive(Debug)]
-///
-/// A Cassandra iterator is a `LendingIterator` because it borrows from some
-/// underlying value, but owns a single item. Each time `next()` is invoked it
-/// decodes the current item into that item, thus invalidating its previous
-/// value.
-pub struct MapIterator<'a>(*mut _CassIterator, PhantomData<&'a _CassValue>);
+pub struct MapIterator(*mut _CassIterator);
 
-// The underlying C type has no thread-local state, and forbids only concurrent
-// mutation/free: https://datastax.github.io/cpp-driver/topics/#thread-safety
-unsafe impl Send for MapIterator<'_> {}
-unsafe impl Sync for MapIterator<'_> {}
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for MapIterator {}
 
-impl MapIterator<'_> {
-    fn get_key(&self) -> Value {
+impl MapIterator {
+    fn get_key(&mut self) -> Value {
         unsafe { Value::build(cass_iterator_get_map_key(self.0)) }
     }
-    fn get_value(&self) -> Value {
+    fn get_value(&mut self) -> Value {
         unsafe { Value::build(cass_iterator_get_map_value(self.0)) }
     }
 
     /// Gets the next k/v pair in the map
-    pub fn get_pair(&self) -> (Value, Value) {
+    pub fn get_pair(&mut self) -> (Value, Value) {
         (self.get_key(), self.get_value())
     }
 }
 
-impl Drop for MapIterator<'_> {
+/// An iterator over the elements of a Cassandra tuple
+#[derive(Debug)]
+pub struct TupleIterator(pub *mut _CassIterator);
+
+// The underlying C type has no thread-local state, but does not support access
+// from multiple threads: https://datastax.github.io/cpp-driver/topics/#thread-safety
+unsafe impl Send for TupleIterator {}
+
+impl Drop for TupleIterator {
     fn drop(&mut self) {
         unsafe { cass_iterator_free(self.0) }
     }
 }
 
-impl LendingIterator for MapIterator<'_> {
-    type Item<'a> = (Value<'a>, Value<'a>) where Self: 'a;
-    fn next(&mut self) -> Option<<Self as LendingIterator>::Item<'_>> {
+impl Iterator for TupleIterator {
+    type Item = Value;
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        unsafe {
+            match cass_iterator_next(self.0) {
+                cass_false => None,
+                cass_true => Some(self.get_value()),
+            }
+        }
+    }
+}
+
+impl TupleIterator {
+    fn get_value(&mut self) -> Value {
+        unsafe { Value::build(cass_iterator_get_value(self.0)) }
+    }
+}
+
+impl Drop for MapIterator {
+    fn drop(&mut self) {
+        unsafe { cass_iterator_free(self.0) }
+    }
+}
+
+impl Iterator for MapIterator {
+    type Item = (Value, Value);
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         unsafe {
             match cass_iterator_next(self.0) {
                 cass_false => None,
