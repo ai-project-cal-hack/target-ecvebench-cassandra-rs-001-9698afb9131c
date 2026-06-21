@@ -14,6 +14,47 @@ version number is tracked in the file `VERSION`.
 
 ### Fixed
 
+## [3.0.2] - 2024-06-18
+
+### Changed
+- Update repo location from
+  [Metaswitch/cassandra-rs](https://github.com/Metaswitch/cassandra-rs) to
+  [cassandra-rs/cassandra-rs](https://github.com/cassandra-rs/cassandra-rs),
+  and update maintainer's affiliation.
+
+## [3.0.1] - 2024-02-29
+
+### Fixed
+- Expose `Row::iter` (which was inadvertently made private in 3.0.0).
+
+## [3.0.0] - 2024-02-28
+
+### Added
+- `get_decimal()` now gets a Cassanda decimal value as `BigDecimal`,
+  `bind_decimal()` does the reverse.
+
+### Changed
+- Date type is now `u32`.
+
+### Fixed
+- Soundness issue fixed - the various iterators no longer implement
+  `std::iter::Iterator`, but instead a new `LendingIterator` trait.
+  For migration guide, see [`README`](README.md#lending-iterator-api-version-30).
+- Many types now take a lifetime argument, e.g., `Value` is now `Value<'a>`,
+  `ResultIterator` is now `ResultIterator<'a>`.
+- `RowIterator` no longer implements `Display` (since it would consume the
+  iterator); however `Row` does.
+- `Result::into_iter()` and `Row::into_iter()` are now both `iter()`, since they
+  do not consume their argument.
+- `TupleIterator` is removed - it was never used, since you use the set iterator
+  (Value::get_set()) for lists, sets, and tuples.
+- `ConstDataType::sub_data_by_name` and `ConstDataType::sub_type_name` now take
+  `&self` rather than an explicit argument.
+- `FunctionMeta::argument` now returns the name and type, rather than just `()`.
+- The underlying raw pointer is no longer exposed as a field of `Cluster`,
+  `ResultIterator`, and `RowIterator`.
+- Many types now implement `Sync` as well as `Send`.
+
 ## [2.0.1] - 2023-06-08
 
 ### Fixed
@@ -275,25 +316,29 @@ First release of https://github.com/Metaswitch/cassandra-rs
 ## [0.8.1] - 2016-12-13
 Last release of https://github.com/tupshin/cassandra-rs
 
-[Unreleased]: https://github.com/Metaswitch/cassandra-rs/compare/2.0.0...HEAD
-[2.0.0]: https://github.com/Metaswitch/cassandra-rs/compare/1.2.0...2.0.0
-[1.2.0]: https://github.com/Metaswitch/cassandra-rs/compare/1.1.0...1.2.0
-[1.1.0]: https://github.com/Metaswitch/cassandra-rs/compare/1.0.0...1.1.0
-[1.0.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.17.2...1.0.0
-[0.17.2]: https://github.com/Metaswitch/cassandra-rs/compare/0.17.1...0.17.2
-[0.17.1]: https://github.com/Metaswitch/cassandra-rs/compare/0.17.0...0.17.1
-[0.17.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.16.0...0.17.0
-[0.16.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.15.1...0.16.0
-[0.15.1]: https://github.com/Metaswitch/cassandra-rs/compare/0.15.0...0.15.1
-[0.15.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.14.0...0.15.0
-[0.14.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.13.2...0.14.0
-[0.13.2]: https://github.com/Metaswitch/cassandra-rs/compare/0.13.1...0.13.2
-[0.13.1]: https://github.com/Metaswitch/cassandra-rs/compare/0.13.0...0.13.1
-[0.13.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.12.0...0.13.0
-[0.12.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.11.0...0.12.0
-[0.11.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.10.2...0.11.0
-[0.10.2]: https://github.com/Metaswitch/cassandra-rs/compare/0.10.1...0.10.2
-[0.10.1]: https://github.com/Metaswitch/cassandra-rs/compare/0.10.0...0.10.1
-[0.10.0]: https://github.com/Metaswitch/cassandra-rs/compare/0.8.2...0.10.0
-[0.8.2]: https://github.com/Metaswitch/cassandra-rs/compare/0.8.1...0.8.2
-[0.8.1]: https://github.com/Metaswitch/cassandra-rs/tree/0.8.1
+[Unreleased]: https://github.com/cassandra-rs/cassandra-rs/compare/3.0.2...HEAD
+[3.0.2]: https://github.com/cassandra-rs/cassandra-rs/compare/3.0.1...3.0.2
+[3.0.1]: https://github.com/cassandra-rs/cassandra-rs/compare/3.0.0...3.0.1
+[3.0.0]: https://github.com/cassandra-rs/cassandra-rs/compare/2.0.1...3.0.0
+[2.0.1]: https://github.com/cassandra-rs/cassandra-rs/compare/2.0.0...2.0.1
+[2.0.0]: https://github.com/cassandra-rs/cassandra-rs/compare/1.2.0...2.0.0
+[1.2.0]: https://github.com/cassandra-rs/cassandra-rs/compare/1.1.0...1.2.0
+[1.1.0]: https://github.com/cassandra-rs/cassandra-rs/compare/1.0.0...1.1.0
+[1.0.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.17.2...1.0.0
+[0.17.2]: https://github.com/cassandra-rs/cassandra-rs/compare/0.17.1...0.17.2
+[0.17.1]: https://github.com/cassandra-rs/cassandra-rs/compare/0.17.0...0.17.1
+[0.17.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.16.0...0.17.0
+[0.16.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.15.1...0.16.0
+[0.15.1]: https://github.com/cassandra-rs/cassandra-rs/compare/0.15.0...0.15.1
+[0.15.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.14.0...0.15.0
+[0.14.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.13.2...0.14.0
+[0.13.2]: https://github.com/cassandra-rs/cassandra-rs/compare/0.13.1...0.13.2
+[0.13.1]: https://github.com/cassandra-rs/cassandra-rs/compare/0.13.0...0.13.1
+[0.13.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.12.0...0.13.0
+[0.12.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.11.0...0.12.0
+[0.11.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.10.2...0.11.0
+[0.10.2]: https://github.com/cassandra-rs/cassandra-rs/compare/0.10.1...0.10.2
+[0.10.1]: https://github.com/cassandra-rs/cassandra-rs/compare/0.10.0...0.10.1
+[0.10.0]: https://github.com/cassandra-rs/cassandra-rs/compare/0.8.2...0.10.0
+[0.8.2]: https://github.com/cassandra-rs/cassandra-rs/compare/0.8.1...0.8.2
+[0.8.1]: https://github.com/cassandra-rs/cassandra-rs/tree/0.8.1
